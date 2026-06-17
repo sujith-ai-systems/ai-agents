@@ -1,0 +1,64 @@
+name: Deploy A2A Server to Cloud Run
+
+# Builds the container (via the repo Dockerfile) and deploys the Options Market
+# Analyzer A2A server to Google Cloud Run on every push to main.
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - "multi-agents/**"
+      - "requirements.txt"
+      - "Dockerfile"
+      - ".dockerignore"
+      - ".github/workflows/deploy-cloudrun.yml"
+  workflow_dispatch: {}
+
+# Required for keyless auth (Workload Identity Federation)
+permissions:
+  contents: read
+  id-token: write
+
+env:
+  # Override these via repository Variables (Settings → Secrets and variables → Actions → Variables)
+  SERVICE: ${{ vars.CLOUD_RUN_SERVICE || 'options-market-analyzer' }}
+  REGION: ${{ vars.GCP_REGION || 'us-central1' }}
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      # Keyless authentication to Google Cloud via Workload Identity Federation.
+      # See README "Deploy to Google Cloud Run" for one-time setup.
+      - name: Authenticate to Google Cloud
+        id: auth
+        uses: google-github-actions/auth@v2
+        with:
+          project_id: ${{ secrets.GCP_PROJECT_ID }}
+          workload_identity_provider: ${{ secrets.WIF_PROVIDER }}
+          service_account: ${{ secrets.WIF_SERVICE_ACCOUNT }}
+
+      - name: Set up Cloud SDK
+        uses: google-github-actions/setup-gcloud@v2
+
+      - name: Deploy to Cloud Run
+        id: deploy
+        uses: google-github-actions/deploy-cloudrun@v2
+        with:
+          service: ${{ env.SERVICE }}
+          region: ${{ env.REGION }}
+          # Source deploy: Cloud Build packages the repo using the Dockerfile.
+          source: .
+          flags: --allow-unauthenticated --port=8080
+          env_vars: |
+            GOOGLE_API_KEY=${{ secrets.GOOGLE_API_KEY }}
+            GROQ_API_KEY=${{ secrets.GROQ_API_KEY }}
+            SLACK_WEBHOOK_URL=${{ secrets.SLACK_WEBHOOK_URL }}
+
+      - name: Show service URL
+        run: |
+          echo "Deployed to: ${{ steps.deploy.outputs.url }}"
+          echo "Agent Card:  ${{ steps.deploy.outputs.url }}/.well-known/agent-card.json"

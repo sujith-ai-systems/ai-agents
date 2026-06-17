@@ -204,6 +204,69 @@ The response is an A2A agent `message` whose text contains the analyzer recommen
 >
 > If you self-host on a cloud VM, also open the port at **both** layers: the OS firewall (e.g. `iptables`/`ufw`) **and** the cloud security group / ingress rules.
 
+## ☁️ Deploy to Google Cloud Run
+
+The repo ships with a [`Dockerfile`](../../Dockerfile) and a GitHub Actions workflow ([`.github/workflows/deploy-cloudrun.yml`](../../.github/workflows/deploy-cloudrun.yml)) that builds the container and deploys the A2A server to **Cloud Run** on every push to `main`.
+
+On Cloud Run the server needs **no** `A2A_PUBLIC_URL` — it derives the Agent Card URL from the request host automatically, so the card always advertises the correct `https://...run.app` address.
+
+### One-time setup
+
+**1. Enable APIs & create a deployer service account**
+
+```bash
+PROJECT_ID=your-project-id
+gcloud config set project "$PROJECT_ID"
+gcloud services enable run.googleapis.com cloudbuild.googleapis.com \
+  artifactregistry.googleapis.com iamcredentials.googleapis.com
+
+gcloud iam service-accounts create cloud-run-deployer \
+  --display-name="GitHub Actions Cloud Run deployer"
+
+SA="cloud-run-deployer@${PROJECT_ID}.iam.gserviceaccount.com"
+for role in run.admin cloudbuild.builds.editor iam.serviceAccountUser \
+            artifactregistry.admin storage.admin; do
+  gcloud projects add-iam-policy-binding "$PROJECT_ID" \
+    --member="serviceAccount:${SA}" --role="roles/${role}"
+done
+```
+
+**2. Configure keyless auth (Workload Identity Federation)**
+
+```bash
+gcloud iam workload-identity-pools create github \
+  --location=global --display-name="GitHub Actions"
+
+gcloud iam workload-identity-pools providers create-oidc github-provider \
+  --location=global --workload-identity-pool=github \
+  --display-name="GitHub provider" \
+  --attribute-mapping="google.subject=assertion.sub,attribute.repository=assertion.repository" \
+  --attribute-condition="assertion.repository=='sujith-ai-systems/ai-agents'" \
+  --issuer-uri="https://token.actions.githubusercontent.com"
+
+PROJECT_NUM=$(gcloud projects describe "$PROJECT_ID" --format='value(projectNumber)')
+gcloud iam service-accounts add-iam-policy-binding "$SA" \
+  --role=roles/iam.workloadIdentityUser \
+  --member="principalSet://iam.googleapis.com/projects/${PROJECT_NUM}/locations/global/workloadIdentityPools/github/attribute.repository/sujith-ai-systems/ai-agents"
+```
+
+**3. Add GitHub repository secrets & variables** (Settings → Secrets and variables → Actions)
+
+| Type | Name | Value |
+|------|------|-------|
+| Secret | `GCP_PROJECT_ID` | your GCP project id |
+| Secret | `WIF_PROVIDER` | `projects/<PROJECT_NUM>/locations/global/workloadIdentityPools/github/providers/github-provider` |
+| Secret | `WIF_SERVICE_ACCOUNT` | `cloud-run-deployer@<PROJECT_ID>.iam.gserviceaccount.com` |
+| Secret | `GOOGLE_API_KEY` | Gemini API key |
+| Secret | `GROQ_API_KEY` | Groq API key |
+| Secret | `SLACK_WEBHOOK_URL` | *(optional)* Slack Incoming Webhook |
+| Variable | `GCP_REGION` | *(optional)* e.g. `us-central1` |
+| Variable | `CLOUD_RUN_SERVICE` | *(optional)* e.g. `options-market-analyzer` |
+
+Push to `main` (or run the workflow manually) and the action prints the deployed URL and Agent Card link. The Cloud Run service is deployed with `--allow-unauthenticated` so A2A clients can reach the card.
+
+> **Tip:** For stronger secret handling, store keys in **Secret Manager** and reference them with the `secrets:` input of `deploy-cloudrun` instead of plain env vars.
+
 ## 📤 Sample Output
 
 

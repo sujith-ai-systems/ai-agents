@@ -1,0 +1,25 @@
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.pytest_cache/
+
+# Virtual environments
+.venv/
+venv/
+
+# Secrets & local config
+.env
+*.env
+!.env.example
+
+# VCS / CI / docs
+.git/
+.github/
+.gitignore
+**/*.md
+
+# Editor / OS noise
+.vscode/
+.idea/
+.DS_Store

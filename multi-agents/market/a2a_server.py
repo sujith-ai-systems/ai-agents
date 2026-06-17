@@ -49,15 +49,32 @@ reviewer = _load("reviewer.py")
 
 # --- configuration --------------------------------------------------------
 HOST = os.getenv("A2A_HOST", "0.0.0.0")
-PORT = int(os.getenv("A2A_PORT", "8000"))
-# Public base URL advertised in the Agent Card (override behind a proxy/tunnel)
-PUBLIC_URL = os.getenv("A2A_PUBLIC_URL", f"http://localhost:{PORT}")
+# Cloud Run injects PORT (usually 8080); fall back to A2A_PORT then 8000.
+PORT = int(os.getenv("PORT", os.getenv("A2A_PORT", "8000")))
+# Public base URL advertised in the Agent Card. If unset, it is derived from the
+# incoming request (works automatically behind Cloud Run / proxies / tunnels).
+PUBLIC_URL = os.getenv("A2A_PUBLIC_URL", "").rstrip("/")
 
 AGENT_VERSION = "1.0.0"
 PROTOCOL_VERSION = "0.3.0"
 
 
-def _agent_card() -> dict:
+def _base_url(request: Request) -> str:
+    """Resolve the public base URL for the Agent Card.
+
+    Priority: explicit A2A_PUBLIC_URL env var, else derive from the incoming
+    request (honoring proxy headers used by Cloud Run / load balancers).
+    """
+    if PUBLIC_URL:
+        return PUBLIC_URL
+    proto = request.headers.get("x-forwarded-proto", request.url.scheme)
+    host = request.headers.get("x-forwarded-host") or request.headers.get("host")
+    if host:
+        return f"{proto}://{host}"
+    return str(request.base_url).rstrip("/")
+
+
+def _agent_card(base_url: str) -> dict:
     """Build the A2A Agent Card describing this agent's identity and skills."""
     return {
         "protocolVersion": PROTOCOL_VERSION,
@@ -68,7 +85,7 @@ def _agent_card() -> dict:
             "single best risk-defined options trade in the 30-45 DTE window using "
             "Google Gemini, then has it independently reviewed by a second LLM (Groq)."
         ),
-        "url": PUBLIC_URL + "/",
+        "url": base_url.rstrip("/") + "/",
         "preferredTransport": "JSONRPC",
         "version": AGENT_VERSION,
         "provider": {
@@ -109,15 +126,15 @@ app = FastAPI(title="Options Market Analyzer — A2A Server", version=AGENT_VERS
 
 
 @app.get("/.well-known/agent-card.json")
-def agent_card_current():
+def agent_card_current(request: Request):
     """A2A Agent Card (current spec path)."""
-    return JSONResponse(_agent_card())
+    return JSONResponse(_agent_card(_base_url(request)))
 
 
 @app.get("/.well-known/agent.json")
-def agent_card_legacy():
+def agent_card_legacy(request: Request):
     """A2A Agent Card (legacy spec path) for older clients."""
-    return JSONResponse(_agent_card())
+    return JSONResponse(_agent_card(_base_url(request)))
 
 
 @app.get("/health")
@@ -210,8 +227,9 @@ if __name__ == "__main__":
     print("=" * 60)
     print("  Options Market Analyzer — A2A Server")
     print("=" * 60)
-    print(f"  Agent Card: {PUBLIC_URL}/.well-known/agent-card.json")
-    print(f"  JSON-RPC:   {PUBLIC_URL}/  (method: message/send)")
+    _shown = PUBLIC_URL or f"http://localhost:{PORT}"
+    print(f"  Agent Card: {_shown}/.well-known/agent-card.json")
+    print(f"  JSON-RPC:   {_shown}/  (method: message/send)")
     print(f"  Listening on http://{HOST}:{PORT}")
     print("=" * 60)
     uvicorn.run(app, host=HOST, port=PORT)
