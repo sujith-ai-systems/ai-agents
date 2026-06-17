@@ -1,0 +1,21 @@
+# Core orchestration & agents
+langchain==1.3.9
+langchain-core==1.4.7
+langgraph==1.2.5
+
+# LLM providers
+langchain-google-genai==4.2.5   # Analyzer (Google Gemini)
+langchain-groq==1.1.3           # Reviewer (Groq / Llama 3.3 70B)
+langchain-openai==1.3.2         # Optional: xAI Grok / OpenRouter
+
+# Market data & quant
+yfinance==1.4.1
+numpy==2.4.6
+pandas==3.0.3
+scipy==1.17.1
+
+# Config
+python-dotenv==1.2.2
+
+# Optional reviewer fallbacks (Ollama / HuggingFace) — uncomment if used
+# langchain-community>=0.3.0
