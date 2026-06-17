@@ -42,6 +42,7 @@ The pipeline is a **LangGraph `StateGraph`** with three nodes passing a shared t
 - **Independent review agent** — a *different* model critiques the first agent's output to reduce single-model bias.
 - **Strict rule enforcement** — only 7 risk-defined strategies, a hard 30–45 DTE window, IV-Rank-to-strategy matching, and no earnings inside the expiry.
 - **Slack delivery** with automatic Markdown → Slack `mrkdwn` conversion and Block Kit formatting.
+- **A2A-ready** — exposed over Google's Agent-to-Agent protocol with a discoverable Agent Card, so other agents can find and call it.
 - **Resilient by design** — every node degrades gracefully; a failure in one stage is captured and passed downstream rather than crashing the pipeline.
 
 ## 📊 Supported Strategies
@@ -68,6 +69,7 @@ The agents are constrained to **7 risk-defined options strategies**, matched to 
 - **Market data:** yfinance
 - **Quant:** NumPy · pandas · SciPy
 - **Delivery:** Slack (Incoming Webhook or Bot Web API)
+- **Interop:** A2A protocol server via FastAPI + Uvicorn (Agent Card + JSON-RPC)
 - **Config:** python-dotenv
 
 ## 📁 Project Structure
@@ -79,6 +81,7 @@ multi-agents/market/
 ├── reviewer.py         # Agent 2 — independent Groq-based trade review
 ├── agent_factory.py    # Reusable LLM builders (Gemini, Groq, Grok, etc.)
 ├── slack_notifier.py   # Slack delivery + Markdown→mrkdwn formatting
+├── a2a_server.py       # A2A protocol server + Agent Card (FastAPI)
 └── README.md
 ```
 
@@ -126,7 +129,75 @@ python multi-agents/market/orchestrator.py
 
 The pipeline will fetch live data, generate a recommendation, review it, print everything to the console, and post the result to Slack.
 
+## 🌐 A2A Server (Google Agent-to-Agent Protocol)
+
+The agent is also exposed over the **[A2A protocol](https://a2a-protocol.org/)**, so other agents and A2A clients can discover and call it through a standard **Agent Card**.
+
+### Start the server
+
+```bash
+python multi-agents/market/a2a_server.py
+```
+
+| Endpoint | Purpose |
+|----------|---------|
+| `GET /.well-known/agent-card.json` | **Agent Card** (discovery) — current A2A spec |
+| `GET /.well-known/agent.json` | Agent Card (legacy path) |
+| `POST /` | JSON-RPC 2.0 endpoint — method `message/send` |
+| `GET /health` | Health check |
+
+### View the Agent Card
+
+```bash
+curl http://localhost:8000/.well-known/agent-card.json
+```
+
+```jsonc
+{
+  "protocolVersion": "0.3.0",
+  "name": "Options Market Analyzer",
+  "description": "Autonomous multi-agent options-trading analyst ...",
+  "url": "http://localhost:8000/",
+  "preferredTransport": "JSONRPC",
+  "version": "1.0.0",
+  "capabilities": { "streaming": false, "pushNotifications": false },
+  "defaultInputModes": ["text/plain"],
+  "defaultOutputModes": ["text/plain"],
+  "skills": [
+    {
+      "id": "analyze-options-trade",
+      "name": "Options Trade Analysis & Review",
+      "tags": ["finance", "options", "trading", "multi-agent"]
+    }
+  ]
+}
+```
+
+### Call the agent (A2A `message/send`)
+
+```bash
+curl -X POST http://localhost:8000/ \
+  -H "Content-Type: application/json" \
+  -d '{
+    "jsonrpc": "2.0",
+    "id": 1,
+    "method": "message/send",
+    "params": {
+      "message": {
+        "role": "user",
+        "parts": [{"kind": "text", "text": "Recommend a trade"}],
+        "messageId": "req-1"
+      }
+    }
+  }'
+```
+
+The response is an A2A agent `message` whose text contains the analyzer recommendation plus the reviewer verdict.
+
+> **Tip:** Set `A2A_PUBLIC_URL` (e.g. to an ngrok/Cloudflare tunnel URL) so the Agent Card advertises a publicly reachable address. Configure host/port with `A2A_HOST` / `A2A_PORT`.
+
 ## 📤 Sample Output
+
 
 ```
 📈 Options Pipeline Result
