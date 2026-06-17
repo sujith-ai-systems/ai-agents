@@ -1,0 +1,23 @@
+name: Deploy · market
+
+# Deploys the Options Market Analyzer agent to its own Cloud Run service.
+# Triggers only when this agent's files (or shared deps) change.
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - "multi-agents/market/**"
+      - "requirements.txt"
+      - ".github/workflows/deploy-agent.yml"
+      - ".github/workflows/deploy-market.yml"
+  workflow_dispatch: {}
+
+jobs:
+  deploy:
+    uses: ./.github/workflows/deploy-agent.yml
+    secrets: inherit
+    with:
+      service: options-market-analyzer
+      directory: multi-agents/market
+      region: us-central1

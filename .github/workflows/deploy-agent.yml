@@ -1,0 +1,100 @@
+name: Deploy Agent to Cloud Run (reusable)
+
+# Reusable workflow: builds one agent's container from its own Dockerfile,
+# pushes it to Artifact Registry, and deploys it to its own Cloud Run service.
+# Each agent under multi-agents/<name>/ gets an independent service.
+
+on:
+  workflow_call:
+    inputs:
+      service:
+        description: Cloud Run service name (one per agent)
+        required: true
+        type: string
+      directory:
+        description: Path to the agent folder (contains a Dockerfile)
+        required: true
+        type: string
+      region:
+        description: GCP region
+        required: false
+        type: string
+        default: us-central1
+      allow_unauthenticated:
+        description: Expose the service publicly (needed for open A2A discovery)
+        required: false
+        type: boolean
+        default: true
+
+permissions:
+  contents: read
+  id-token: write
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    env:
+      AR_REPO: agents # Artifact Registry repository (one repo holds all agents)
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Authenticate to Google Cloud
+        uses: google-github-actions/auth@v2
+        with:
+          project_id: ${{ secrets.GCP_PROJECT_ID }}
+          workload_identity_provider: ${{ secrets.WIF_PROVIDER }}
+          service_account: ${{ secrets.WIF_SERVICE_ACCOUNT }}
+
+      - name: Set up Cloud SDK
+        uses: google-github-actions/setup-gcloud@v2
+
+      - name: Configure Docker for Artifact Registry
+        run: gcloud auth configure-docker ${{ inputs.region }}-docker.pkg.dev --quiet
+
+      - name: Build & push image
+        id: image
+        run: |
+          IMAGE="${{ inputs.region }}-docker.pkg.dev/${{ secrets.GCP_PROJECT_ID }}/${AR_REPO}/${{ inputs.service }}:${GITHUB_SHA::12}"
+          docker build -f "${{ inputs.directory }}/Dockerfile" -t "$IMAGE" .
+          docker push "$IMAGE"
+          echo "image=$IMAGE" >> "$GITHUB_OUTPUT"
+
+      - name: Assemble env vars (only non-empty secrets)
+        id: env
+        env:
+          GOOGLE_API_KEY: ${{ secrets.GOOGLE_API_KEY }}
+          GROQ_API_KEY: ${{ secrets.GROQ_API_KEY }}
+          OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+          XAI_API_KEY: ${{ secrets.XAI_API_KEY }}
+          SLACK_WEBHOOK_URL: ${{ secrets.SLACK_WEBHOOK_URL }}
+          SLACK_BOT_TOKEN: ${{ secrets.SLACK_BOT_TOKEN }}
+          SLACK_CHANNEL: ${{ secrets.SLACK_CHANNEL }}
+        run: |
+          vars=""
+          add() { [ -n "$2" ] && vars="${vars:+$vars,}$1=$2"; }
+          add GOOGLE_API_KEY "$GOOGLE_API_KEY"
+          add GROQ_API_KEY "$GROQ_API_KEY"
+          add OPENAI_API_KEY "$OPENAI_API_KEY"
+          add XAI_API_KEY "$XAI_API_KEY"
+          add SLACK_WEBHOOK_URL "$SLACK_WEBHOOK_URL"
+          add SLACK_BOT_TOKEN "$SLACK_BOT_TOKEN"
+          add SLACK_CHANNEL "$SLACK_CHANNEL"
+          echo "vars=$vars" >> "$GITHUB_OUTPUT"
+
+      - name: Deploy to Cloud Run
+        id: deploy
+        uses: google-github-actions/deploy-cloudrun@v2
+        with:
+          service: ${{ inputs.service }}
+          region: ${{ inputs.region }}
+          image: ${{ steps.image.outputs.image }}
+          flags: ${{ inputs.allow_unauthenticated && '--allow-unauthenticated --port=8080' || '--port=8080' }}
+          env_vars: ${{ steps.env.outputs.vars }}
+
+      - name: Summary
+        run: |
+          echo "### Deployed ${{ inputs.service }} :rocket:" >> "$GITHUB_STEP_SUMMARY"
+          echo "" >> "$GITHUB_STEP_SUMMARY"
+          echo "- URL: ${{ steps.deploy.outputs.url }}" >> "$GITHUB_STEP_SUMMARY"
+          echo "- Agent Card: ${{ steps.deploy.outputs.url }}/.well-known/agent-card.json" >> "$GITHUB_STEP_SUMMARY"
