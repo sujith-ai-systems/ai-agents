@@ -139,6 +139,12 @@ The agent is also exposed over the **[A2A protocol](https://a2a-protocol.org/)**
 python multi-agents/market/a2a_server.py
 ```
 
+For public/remote hosting, advertise a reachable address in the Agent Card:
+
+```bash
+A2A_PUBLIC_URL=http://<your-host>:8000 python multi-agents/market/a2a_server.py
+```
+
 | Endpoint | Purpose |
 |----------|---------|
 | `GET /.well-known/agent-card.json` | **Agent Card** (discovery) — current A2A spec |
@@ -194,7 +200,9 @@ curl -X POST http://localhost:8000/ \
 
 The response is an A2A agent `message` whose text contains the analyzer recommendation plus the reviewer verdict.
 
-> **Tip:** Set `A2A_PUBLIC_URL` (e.g. to an ngrok/Cloudflare tunnel URL) so the Agent Card advertises a publicly reachable address. Configure host/port with `A2A_HOST` / `A2A_PORT`.
+> **Important:** A2A clients first fetch the Agent Card, then send messages to the `url` it advertises. By default that is `http://localhost:8000/`, which a remote client cannot reach. When hosting publicly, set **`A2A_PUBLIC_URL`** to a reachable address (public IP/DNS, or an ngrok/Cloudflare tunnel) so the card points back to your server. Configure binding with `A2A_HOST` / `A2A_PORT`.
+>
+> If you self-host on a cloud VM, also open the port at **both** layers: the OS firewall (e.g. `iptables`/`ufw`) **and** the cloud security group / ingress rules.
 
 ## 📤 Sample Output
 
