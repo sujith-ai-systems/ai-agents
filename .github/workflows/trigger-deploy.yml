@@ -3,33 +3,56 @@ name: Trigger deploy
 # This is the ONLY workflow in this public repo. It does NOT build or deploy
 # anything and prints no infrastructure details. On a push to main that touches
 # an agent, it sends a repository_dispatch event to the PRIVATE deploy repo
-# (sujith-ai-systems/ai-agents-deploy), which runs the actual Cloud Run deploy.
+# (sujith-ai-systems/ai-agents-deploy), passing the Cloud Run service name and
+# the agent directory. The private repo runs the actual Cloud Run deploy with a
+# single, agent-agnostic workflow — so adding a new agent only means adding a
+# job here (no change in the private repo).
 #
-# Requires a repo secret DEPLOY_DISPATCH_TOKEN: a GitHub PAT that can send
-# repository_dispatch to the private deploy repo.
-#   - Fine-grained PAT: repo = sujith-ai-systems/ai-agents-deploy,
-#     permission "Contents: Read and write" (Metadata: Read is auto).
-#   - Or classic PAT with "repo" scope.
+# Requires a repo secret DEPLOY_DISPATCH_TOKEN: a GitHub PAT scoped to the
+# private deploy repo with "Contents: Read and write" (or a classic "repo" PAT).
 
 on:
   push:
     branches: [main]
     paths:
       - "multi-agents/market/**"
+      # Add new agent paths here, then add a matching job below, e.g.:
+      # - "multi-agents/climate/**"
 
 permissions:
   contents: read
 
 jobs:
-  dispatch-market:
+  market:
+    # Only dispatch when this agent's files actually changed.
+    if: ${{ github.event_name != 'push' || contains(toJSON(github.event.commits.*.modified), 'multi-agents/market/') || contains(toJSON(github.event.commits.*.added), 'multi-agents/market/') }}
     runs-on: ubuntu-latest
     steps:
-      - name: Dispatch deploy to private repo
+      - name: Dispatch deploy (market)
         env:
           GH_TOKEN: ${{ secrets.DEPLOY_DISPATCH_TOKEN }}
         run: |
-          gh api \
-            repos/sujith-ai-systems/ai-agents-deploy/dispatches \
-            -f event_type=deploy-market \
+          gh api repos/sujith-ai-systems/ai-agents-deploy/dispatches \
+            -f event_type=deploy \
+            -f client_payload[service]=options-market-analyzer \
+            -f client_payload[directory]=multi-agents/market \
             -f client_payload[code_ref]="${GITHUB_SHA}"
-          echo "Dispatched deploy-market (code_ref=${GITHUB_SHA}) to private deploy repo."
+          echo "Dispatched deploy for options-market-analyzer (code_ref=${GITHUB_SHA})."
+
+  # To add another agent (e.g. climate analysis):
+  #   1. Add its path under `on.push.paths` above.
+  #   2. Copy the job below, set service + directory, and gate it with a path filter.
+  #
+  # climate:
+  #   if: ${{ contains(toJSON(github.event.commits.*.modified), 'multi-agents/climate/') || contains(toJSON(github.event.commits.*.added), 'multi-agents/climate/') }}
+  #   runs-on: ubuntu-latest
+  #   steps:
+  #     - name: Dispatch deploy (climate)
+  #       env:
+  #         GH_TOKEN: ${{ secrets.DEPLOY_DISPATCH_TOKEN }}
+  #       run: |
+  #         gh api repos/sujith-ai-systems/ai-agents-deploy/dispatches \
+  #           -f event_type=deploy \
+  #           -f client_payload[service]=climate-analysis \
+  #           -f client_payload[directory]=multi-agents/climate \
+  #           -f client_payload[code_ref]="${GITHUB_SHA}"

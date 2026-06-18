@@ -243,7 +243,7 @@ Adding a new agent is mostly self-contained:
    CMD ["python", "multi-agents/<new-agent>/server.py"]
    ```
 
-2. **Add a per-agent caller workflow in the private deploy repo** pointing at `directory: multi-agents/<new-agent>` and a unique Cloud Run `service:` name.
+2. **Add a dispatch job in this repo's [`.github/workflows/trigger-deploy.yml`](../../.github/workflows/trigger-deploy.yml)** with `service=<cloud-run-name>` and `directory=multi-agents/<new-agent>`. The private deploy repo uses one generic workflow, so **no change is needed there**.
 
 Each agent builds, versions, and deploys **independently**.
 
