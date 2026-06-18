@@ -96,5 +96,9 @@ jobs:
         run: |
           echo "### Deployed ${{ inputs.service }} :rocket:" >> "$GITHUB_STEP_SUMMARY"
           echo "" >> "$GITHUB_STEP_SUMMARY"
-          echo "- URL: ${{ steps.deploy.outputs.url }}" >> "$GITHUB_STEP_SUMMARY"
-          echo "- Agent Card: ${{ steps.deploy.outputs.url }}/.well-known/agent-card.json" >> "$GITHUB_STEP_SUMMARY"
+          echo "Deployment succeeded. The service URL is intentionally not printed here" >> "$GITHUB_STEP_SUMMARY"
+          echo "because this is a public repository (Actions logs are public)." >> "$GITHUB_STEP_SUMMARY"
+          echo "Retrieve it privately with:" >> "$GITHUB_STEP_SUMMARY"
+          echo '```' >> "$GITHUB_STEP_SUMMARY"
+          echo "gcloud run services describe ${{ inputs.service }} --region ${{ inputs.region }} --format='value(status.url)'" >> "$GITHUB_STEP_SUMMARY"
+          echo '```' >> "$GITHUB_STEP_SUMMARY"
