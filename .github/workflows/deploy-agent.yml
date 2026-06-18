@@ -72,7 +72,7 @@ jobs:
           SLACK_CHANNEL: ${{ secrets.SLACK_CHANNEL }}
         run: |
           vars=""
-          add() { [ -n "$2" ] && vars="${vars:+$vars,}$1=$2"; }
+          add() { if [ -n "$2" ]; then vars="${vars:+$vars,}$1=$2"; fi; }
           add GOOGLE_API_KEY "$GOOGLE_API_KEY"
           add GROQ_API_KEY "$GROQ_API_KEY"
           add OPENAI_API_KEY "$OPENAI_API_KEY"
