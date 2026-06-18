@@ -206,76 +206,15 @@ The response is an A2A agent `message` whose text contains the analyzer recommen
 
 ## ☁️ Deploy to Google Cloud Run
 
-Each agent under `multi-agents/<name>/` is deployed as its **own independent Cloud Run service**. The CI is built from two pieces:
+Each agent ships with its own [`Dockerfile`](Dockerfile) and is deployed as its **own independent Cloud Run service**.
 
-- [`.github/workflows/deploy-agent.yml`](../../.github/workflows/deploy-agent.yml) — a **reusable** workflow that builds an agent's [`Dockerfile`](Dockerfile), pushes the image to Artifact Registry, and deploys it to a named Cloud Run service.
-- [`.github/workflows/deploy-market.yml`](../../.github/workflows/deploy-market.yml) — a thin **per-agent caller** that runs only when this agent's files (or shared `requirements.txt`) change, and calls the reusable workflow with `service: options-market-analyzer`.
+Deployment is driven from a **separate private control-plane repository** (so build logs and the live service URL stay private while this code stays public). That private repo checks out this code at a given ref, builds the agent's `Dockerfile`, pushes the image to Artifact Registry, and deploys to Cloud Run using keyless **Workload Identity Federation** — no long-lived keys.
 
 On Cloud Run the server needs **no** `A2A_PUBLIC_URL` — it derives the Agent Card URL from the request host automatically, so the card always advertises the correct `https://...run.app` address.
 
-### One-time setup
-
-**1. Enable APIs & create a deployer service account**
-
-```bash
-PROJECT_ID=your-project-id
-gcloud config set project "$PROJECT_ID"
-gcloud services enable run.googleapis.com cloudbuild.googleapis.com \
-  artifactregistry.googleapis.com iamcredentials.googleapis.com
-
-# One Artifact Registry repo holds the images for ALL agents
-gcloud artifacts repositories create agents \
-  --repository-format=docker --location=us-central1 \
-  --description="Container images for multi-agents"
-
-gcloud iam service-accounts create cloud-run-deployer \
-  --display-name="GitHub Actions Cloud Run deployer"
-
-SA="cloud-run-deployer@${PROJECT_ID}.iam.gserviceaccount.com"
-for role in run.admin cloudbuild.builds.editor iam.serviceAccountUser \
-            artifactregistry.writer; do
-  gcloud projects add-iam-policy-binding "$PROJECT_ID" \
-    --member="serviceAccount:${SA}" --role="roles/${role}"
-done
-```
-
-**2. Configure keyless auth (Workload Identity Federation)**
-
-```bash
-gcloud iam workload-identity-pools create github \
-  --location=global --display-name="GitHub Actions"
-
-gcloud iam workload-identity-pools providers create-oidc github-provider \
-  --location=global --workload-identity-pool=github \
-  --display-name="GitHub provider" \
-  --attribute-mapping="google.subject=assertion.sub,attribute.repository=assertion.repository" \
-  --attribute-condition="assertion.repository=='sujith-ai-systems/ai-agents'" \
-  --issuer-uri="https://token.actions.githubusercontent.com"
-
-PROJECT_NUM=$(gcloud projects describe "$PROJECT_ID" --format='value(projectNumber)')
-gcloud iam service-accounts add-iam-policy-binding "$SA" \
-  --role=roles/iam.workloadIdentityUser \
-  --member="principalSet://iam.googleapis.com/projects/${PROJECT_NUM}/locations/global/workloadIdentityPools/github/attribute.repository/sujith-ai-systems/ai-agents"
-```
-
-**3. Add GitHub repository secrets** (Settings → Secrets and variables → Actions). These are shared by every agent's deploy:
-
-| Name | Value |
-|------|-------|
-| `GCP_PROJECT_ID` | your GCP project id |
-| `WIF_PROVIDER` | `projects/<PROJECT_NUM>/locations/global/workloadIdentityPools/github/providers/github-provider` |
-| `WIF_SERVICE_ACCOUNT` | `cloud-run-deployer@<PROJECT_ID>.iam.gserviceaccount.com` |
-| `GOOGLE_API_KEY` | Gemini API key |
-| `GROQ_API_KEY` | Groq API key |
-| `SLACK_WEBHOOK_URL` | *(optional)* Slack Incoming Webhook |
-
-The reusable workflow injects only the secrets that are set, so agents that don't need a particular key are unaffected.
-
-Push to `main` (or run **Deploy · market** manually) and the run summary prints the deployed URL and Agent Card link. The service is deployed `--allow-unauthenticated` so A2A clients can reach the card.
-
 ### ➕ Add another agent
 
-Adding a new agent is two files — no change to the reusable workflow:
+Adding a new agent is mostly self-contained:
 
 1. **Scaffold the agent folder** with its own server and `Dockerfile`:
 
@@ -286,7 +225,7 @@ Adding a new agent is two files — no change to the reusable workflow:
    └── requirements.txt        # optional — falls back to the shared root file
    ```
 
-   The `Dockerfile` is built from the **repo root** as context, so copy what you need, e.g.:
+   The `Dockerfile` is built with the repo as context, so copy what you need, e.g.:
 
    ```dockerfile
    FROM python:3.12-slim
@@ -298,31 +237,9 @@ Adding a new agent is two files — no change to the reusable workflow:
    CMD ["python", "multi-agents/<new-agent>/server.py"]
    ```
 
-2. **Add a per-agent caller workflow** `.github/workflows/deploy-<new-agent>.yml`:
+2. **Add a per-agent caller workflow in the private deploy repo** pointing at `directory: multi-agents/<new-agent>` and a unique Cloud Run `service:` name.
 
-   ```yaml
-   name: Deploy · <new-agent>
-   on:
-     push:
-       branches: [main]
-       paths:
-         - "multi-agents/<new-agent>/**"
-         - ".github/workflows/deploy-agent.yml"
-         - ".github/workflows/deploy-<new-agent>.yml"
-     workflow_dispatch: {}
-   jobs:
-     deploy:
-       uses: ./.github/workflows/deploy-agent.yml
-       secrets: inherit
-       with:
-         service: <new-agent>-service   # unique Cloud Run service name
-         directory: multi-agents/<new-agent>
-         region: us-central1
-   ```
-
-Each agent now builds, versions, and deploys **independently** — a change to one agent only redeploys that agent's service.
-
-> **Tip:** For stronger secret handling, store keys in **Secret Manager** and reference them with the `secrets:` input of `deploy-cloudrun` instead of plain env vars.
+Each agent builds, versions, and deploys **independently**.
 
 ## 📤 Sample Output
 
