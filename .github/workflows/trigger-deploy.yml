@@ -15,17 +15,43 @@ on:
   push:
     branches: [main]
     paths:
-      - "multi-agents/market/**"
-      # Add new agent paths here, then add a matching job below, e.g.:
-      # - "multi-agents/climate/**"
+      - "multi-agents/**"
 
 permissions:
   contents: read
 
 jobs:
+  # Detect which agents changed in this push (reliable git diff, no flaky
+  # webhook-payload expressions). Each agent gets a boolean output.
+  changes:
+    runs-on: ubuntu-latest
+    outputs:
+      market: ${{ steps.detect.outputs.market }}
+      # climate: ${{ steps.detect.outputs.climate }}
+    steps:
+      - name: Checkout (full history to diff the push)
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: Detect changed agents
+        id: detect
+        env:
+          BEFORE: ${{ github.event.before }}
+        run: |
+          base="$BEFORE"
+          # New branch / forced push: 'before' may be all-zeros or missing — fall back to the parent commit.
+          if [ -z "$base" ] || [ "$base" = "0000000000000000000000000000000000000000" ] || ! git cat-file -e "${base}^{commit}" 2>/dev/null; then
+            base="$(git rev-parse HEAD^ 2>/dev/null || git rev-parse HEAD)"
+          fi
+          changed="$(git diff --name-only "$base" HEAD || true)"
+          echo "Changed files:"; echo "$changed"
+          emit() { if echo "$changed" | grep -q "^$2"; then echo "$1=true" >> "$GITHUB_OUTPUT"; else echo "$1=false" >> "$GITHUB_OUTPUT"; fi; }
+          emit market  "multi-agents/market/"
+          # emit climate "multi-agents/climate/"
+
   market:
-    # Only dispatch when this agent's files actually changed.
-    if: ${{ github.event_name != 'push' || contains(toJSON(github.event.commits.*.modified), 'multi-agents/market/') || contains(toJSON(github.event.commits.*.added), 'multi-agents/market/') }}
+    needs: changes
+    if: ${{ needs.changes.outputs.market == 'true' }}
     runs-on: ubuntu-latest
     steps:
       - name: Dispatch deploy (market)
@@ -40,11 +66,13 @@ jobs:
           echo "Dispatched deploy for options-market-analyzer (code_ref=${GITHUB_SHA})."
 
   # To add another agent (e.g. climate analysis):
-  #   1. Add its path under `on.push.paths` above.
-  #   2. Copy the job below, set service + directory, and gate it with a path filter.
+  #   1. Add `climate: ${{ steps.detect.outputs.climate }}` to the `changes` outputs above.
+  #   2. Uncomment the matching `emit climate ...` line in the detect step.
+  #   3. Copy the job below, setting service + directory.
   #
   # climate:
-  #   if: ${{ contains(toJSON(github.event.commits.*.modified), 'multi-agents/climate/') || contains(toJSON(github.event.commits.*.added), 'multi-agents/climate/') }}
+  #   needs: changes
+  #   if: ${{ needs.changes.outputs.climate == 'true' }}
   #   runs-on: ubuntu-latest
   #   steps:
   #     - name: Dispatch deploy (climate)
