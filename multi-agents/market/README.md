@@ -212,6 +212,12 @@ Deployment is driven from a **separate private control-plane repository** (so bu
 
 On Cloud Run the server needs **no** `A2A_PUBLIC_URL` — it derives the Agent Card URL from the request host automatically, so the card always advertises the correct `https://...run.app` address.
 
+### 🔁 Auto-deploy on push
+
+This repo's only workflow, [`.github/workflows/trigger-deploy.yml`](../../.github/workflows/trigger-deploy.yml), reacts to pushes on `main` that touch `multi-agents/market/**`. It builds and deploys nothing itself and prints no infrastructure details — it just sends a `repository_dispatch` event to the private deploy repo, which runs the actual Cloud Run deploy. This keeps build logs and the service URL private while the code stays public.
+
+It requires a repo secret `DEPLOY_DISPATCH_TOKEN` (a GitHub token scoped to the private deploy repo with **Contents: Read and write**). To deploy manually instead, run the workflow directly in the private repo.
+
 ### ➕ Add another agent
 
 Adding a new agent is mostly self-contained:
